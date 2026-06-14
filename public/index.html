@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgentView — Session Viewer</title>
+<style>
+  :root {
+    --bg: #1f2228;
+    --surface: rgba(255,255,255,0.03);
+    --surface-warm: rgba(255,255,255,0.05);
+    --fg: #ffffff;
+    --fg-2: rgba(255,255,255,0.7);
+    --muted: rgba(255,255,255,0.5);
+    --meta: rgba(255,255,255,0.3);
+    --border: rgba(255,255,255,0.1);
+    --border-soft: rgba(255,255,255,0.05);
+    --accent: #ffffff;
+    --accent-on: #1f2228;
+    --prompt: rgba(255,255,255,0.7);
+    --warn: #eab308;
+    --exec: rgba(255,255,255,0.6);
+    --search-hl: rgba(255,255,255,0.12);
+    --font-mono: "JetBrains Mono", "GeistMono", ui-monospace, SF Mono, Roboto Mono, Menlo, Monaco, monospace;
+    --font-body: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif;
+    --sidebar-w: 260px;
+    --outline-w: 200px;
+    --topbar-h: 44px;
+    --motion-base: 200ms;
+    --ease: cubic-bezier(0.2, 0, 0, 1);
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body, #root { height: 100%; overflow: hidden; }
+  body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 13px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 0; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script type="text/babel" data-type="module">
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+const Icon = {
+  menu:   React.createElement('svg', {width:16,height:16,viewBox:'0 0 16 16',fill:'none',children:React.createElement('path',{d:'M3 4h10M3 8h10M3 12h10',stroke:'currentColor',strokeWidth:1.6,strokeLinecap:'round'})}),
+  search: React.createElement('svg', {width:14,height:14,viewBox:'0 0 16 16',fill:'none',children:[React.createElement('circle',{key:'c',cx:7,cy:7,r:4.5,stroke:'currentColor',strokeWidth:1.6}),React.createElement('path',{key:'p',d:'M10.5 10.5L14 14',stroke:'currentColor',strokeWidth:1.6,strokeLinecap:'round'})]}),
+  close:  React.createElement('svg', {width:14,height:14,viewBox:'0 0 16 16',fill:'none',children:React.createElement('path',{d:'M4 4l8 8M12 4l-8 8',stroke:'currentColor',strokeWidth:1.6,strokeLinecap:'round'})}),
+  chevronRight: React.createElement('svg', {width:12,height:12,viewBox:'0 0 16 16',fill:'none',children:React.createElement('path',{d:'M6 4l4 4-4 4',stroke:'currentColor',strokeWidth:1.6,strokeLinecap:'round',strokeLinejoin:'round'})}),
+  chevronDown:  React.createElement('svg', {width:12,height:12,viewBox:'0 0 16 16',fill:'none',children:React.createElement('path',{d:'M4 6l4 4 4-4',stroke:'currentColor',strokeWidth:1.6,strokeLinecap:'round',strokeLinejoin:'round'})}),
+  folder: React.createElement('svg', {width:14,height:14,viewBox:'0 0 16 16',fill:'none',children:React.createElement('path',{d:'M2 4a1 1 0 011-1h3.5l1.5 2H13a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1V4z',stroke:'currentColor',strokeWidth:1.4,fill:'none'})}),
+  terminal: React.createElement('svg', {width:14,height:14,viewBox:'0 0 16 16',fill:'none',children:React.createElement('path',{d:'M3 5l3 3-3 3M8 11h5',stroke:'currentColor',strokeWidth:1.6,strokeLinecap:'round',strokeLinejoin:'round'})}),
+  user: React.createElement('svg', {width:14,height:14,viewBox:'0 0 16 16',fill:'none',children:[React.createElement('circle',{key:'c',cx:8,cy:5,r:3,stroke:'currentColor',strokeWidth:1.4}),React.createElement('path',{key:'p',d:'M3 14c0-3 2-5 5-5s5 2 5 5',stroke:'currentColor',strokeWidth:1.4,strokeLinecap:'round'})]}),
+  bot: React.createElement('svg', {width:14,height:14,viewBox:'0 0 16 16',fill:'none',children:[React.createElement('rect',{key:'r',x:3,y:4,width:10,height:8,rx:2,stroke:'currentColor',strokeWidth:1.4}),React.createElement('circle',{key:'c1',cx:6.5,cy:8,r:0.8,fill:'currentColor'}),React.createElement('circle',{key:'c2',cx:9.5,cy:8,r:0.8,fill:'currentColor'}),React.createElement('path',{key:'p',d:'M8 2v2M5 12v2M11 12v2',stroke:'currentColor',strokeWidth:1.4,strokeLinecap:'round'})]}),
+  tool: React.createElement('svg', {width:14,height:14,viewBox:'0 0 16 16',fill:'none',children:[React.createElement('path',{key:'a',d:'M5 3l-2 2 6 6 2-2-6-6z',stroke:'currentColor',strokeWidth:1.4}),React.createElement('circle',{key:'b',cx:11,cy:5,r:2.5,stroke:'currentColor',strokeWidth:1.4})]}),
+  system: React.createElement('svg', {width:14,height:14,viewBox:'0 0 16 16',fill:'none',children:[React.createElement('circle',{key:'c',cx:8,cy:8,r:5,stroke:'currentColor',strokeWidth:1.4}),React.createElement('path',{key:'p',d:'M8 5v3l2 2',stroke:'currentColor',strokeWidth:1.4,strokeLinecap:'round'})]}),
+  refresh: React.createElement('svg', {width:14,height:14,viewBox:'0 0 16 16',fill:'none',children:[React.createElement('path',{key:'a',d:'M2 8a6 6 0 0110.47-4M14 8a6 6 0 01-10.47 4',stroke:'currentColor',strokeWidth:1.4,strokeLinecap:'round'}),React.createElement('path',{key:'b',d:'M13 2v4H9M3 14v-4h4',stroke:'currentColor',strokeWidth:1.4,strokeLinecap:'round',strokeLinejoin:'round'})]}),
+};
+
+const S = {
+  topbar: { display:'flex', alignItems:'center', height:'44px', padding:'0 12px', borderBottom:'1px solid var(--border)', gap:8, flexShrink:0 },
+  sidebar: { width:'260px', borderRight:'1px solid var(--border)', display:'flex', flexDirection:'column', flexShrink:0, overflow:'hidden' },
+  sidebarHead: { padding:'8px 12px', fontSize:11, fontWeight:600, color:'var(--meta)', textTransform:'uppercase', letterSpacing:'0.5px', display:'flex', justifyContent:'space-between', alignItems:'center' },
+  sessionItem: function(active) { return { display:'flex', alignItems:'center', gap:8, padding:'6px 12px', cursor:'pointer', background:active ? 'var(--surface-warm)' : 'transparent', borderLeft: active ? '2px solid var(--accent)' : '2px solid transparent', transition:'background var(--motion-base)', fontSize:12, fontFamily:'var(--font-mono)', color: active ? 'var(--fg)' : 'var(--fg-2)' }; },
+  sessionItemHover: { background:'var(--surface)' },
+  sourceDot: function(source) { return { width:6, height:6, borderRadius:0, flexShrink:0, background: source === 'qwen' ? 'var(--warn)' : 'var(--exec)' }; },
+  content: { flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minWidth:0 },
+  chatArea: { flex:1, overflow:'auto', padding:'16px 20px' },
+  msgRow: function(role) { return { display:'flex', gap:10, marginBottom:20, flexDirection: role === 'user' ? 'row-reverse' : 'row' }; },
+  msgAvatar: function(role) { return { width:28, height:28, display:'flex', alignItems:'center', justifyContent:'center', background: role === 'user' ? 'var(--surface-warm)' : 'var(--surface)', flexShrink:0, color: role === 'user' ? 'var(--fg-2)' : 'var(--muted)' }; },
+  msgBubble: function(role) { return { maxWidth:'75%', padding:'8px 12px', background: role === 'user' ? 'var(--surface-warm)' : 'var(--surface)', border:'1px solid var(--border-soft)', fontSize:13, lineHeight:1.6, whiteSpace:'pre-wrap', wordBreak:'break-word', fontFamily:'var(--font-body)' }; },
+  msgTime: { fontSize:10, color:'var(--meta)', marginTop:4, fontFamily:'var(--font-mono)' },
+  thinkingBlock: { background:'var(--surface)', border:'1px solid var(--border-soft)', padding:'8px 12px', marginBottom:8, cursor:'pointer' },
+  toolCallBlock: { background:'var(--surface)', border:'1px solid var(--border)', padding:'8px 12px', marginBottom:8, fontFamily:'var(--font-mono)', fontSize:12 },
+  toolResultBlock: { background:'var(--surface)', border:'1px solid var(--border-soft)', padding:'8px 12px', marginBottom:8, fontSize:12, maxHeight:200, overflow:'auto', color:'var(--fg-2)' },
+  systemBlock: { padding:'4px 0', marginBottom:4, fontSize:10, color:'var(--meta)', fontFamily:'var(--font-mono)', display:'flex', alignItems:'center', gap:6 },
+  emptyState: { display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', color:'var(--meta)', gap:12 },
+  topbarTitle: { fontSize:14, fontWeight:600, fontFamily:'var(--font-mono)' },
+  topbarMeta: { fontSize:11, color:'var(--meta)', fontFamily:'var(--font-mono)', marginLeft:8 },
+  inputBar: { display:'flex', alignItems:'center', padding:'8px 12px', borderTop:'1px solid var(--border)', gap:8, flexShrink:0 },
+  searchInput: { flex:1, background:'var(--surface)', border:'1px solid var(--border)', color:'var(--fg)', padding:'6px 10px', fontSize:12, fontFamily:'var(--font-mono)', outline:'none' },
+  badge: { fontSize:10, padding:'1px 6px', background:'var(--surface-warm)', color:'var(--muted)', fontFamily:'var(--font-mono)' },
+  sourceGroup: { padding:'4px 12px', fontSize:10, fontWeight:600, color:'var(--meta)', textTransform:'uppercase', letterSpacing:'0.5px', marginTop:8 },
+  loading: { display:'flex', alignItems:'center', justifyContent:'center', padding:20, color:'var(--meta)', gap:8 },
+  loadMore: { textAlign:'center', padding:'12px', cursor:'pointer', color:'var(--muted)', fontSize:12, fontFamily:'var(--font-mono)', borderTop:'1px solid var(--border-soft)' },
+  outline: { width:'200px', borderLeft:'1px solid var(--border)', display:'flex', flexDirection:'column', flexShrink:0, overflow:'hidden' },
+  outlineHead: { padding:'8px 12px', fontSize:11, fontWeight:600, color:'var(--meta)', textTransform:'uppercase', letterSpacing:'0.5px', borderBottom:'1px solid var(--border-soft)' },
+  outlineItem: function(active) { return { display:'flex', alignItems:'center', gap:6, padding:'4px 12px', cursor:'pointer', fontSize:11, fontFamily:'var(--font-mono)', color: active ? 'var(--fg)' : 'var(--muted)', background: active ? 'var(--surface-warm)' : 'transparent', borderLeft: active ? '2px solid var(--accent)' : '2px solid transparent', overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis' }; },
+};
+
+function App() {
+  const [sessions, setSessions] = useState([]);
+  const [activeSession, setActiveSession] = useState(null);
+  const [lines, setLines] = useState([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [loadingSessions, setLoadingSessions] = useState(true);
+  const [error, setError] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSystem, setShowSystem] = useState(false);
+  const [outlineOpen, setOutlineOpen] = useState(true);
+  var [activeAnchorIndex, setActiveAnchorIndex] = useState(0);
+  var outlineRef = useRef(null);
+  const chatRef = useRef(null);
+  const offsetRef = useRef(0);
+
+  useEffect(function() {
+    fetch('/api/sessions')
+      .then(function(r) { return r.json(); })
+      .then(function(data) { setSessions(data); setLoadingSessions(false); })
+      .catch(function(err) { setError(err.message); setLoadingSessions(false); });
+  }, []);
+
+  const loadSession = useCallback(function(session, append) {
+    append = append || false;
+    setLoading(true);
+    setError(null);
+    var offset = append ? offsetRef.current : 0;
+    fetch('/api/sessions/' + session.source + '/' + session.project + '/' + session.id + '?offset=' + offset + '&limit=200')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (append) {
+          setLines(function(prev) { return prev.concat(data.lines); });
+        } else {
+          setLines(data.lines);
+          setActiveSession(session);
+          offsetRef.current = 0;
+        }
+        setHasMore(data.hasMore);
+        offsetRef.current = offset + data.lines.length;
+        setLoading(false);
+      })
+      .catch(function(err) { setError(err.message); setLoading(false); });
+  }, []);
+
+  const handleSessionClick = useCallback(function(session) {
+    loadSession(session, false);
+    if (chatRef.current) chatRef.current.scrollTop = 0;
+  }, [loadSession]);
+
+  const loadMore = useCallback(function() {
+    if (activeSession && hasMore && !loading) {
+      loadSession(activeSession, true);
+    }
+  }, [activeSession, hasMore, loading, loadSession]);
+
+  var scrollToEntry = function(index) {
+    var el = document.getElementById('entry-' + index);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  var handleChatScroll = useCallback(function() {
+    if (!chatRef.current) return;
+    var entries = chatRef.current.querySelectorAll('[id^="entry-"]');
+    var chatTop = chatRef.current.scrollTop;
+    var chatHeight = chatRef.current.clientHeight;
+    for (var i = entries.length - 1; i >= 0; i--) {
+      var el = entries[i];
+      if (el.offsetTop <= chatTop + chatHeight / 3) {
+        setActiveAnchorIndex(i);
+        break;
+      }
+    }
+  }, []);
+
+  const filteredSessions = useMemo(function() {
+    if (!searchQuery.trim()) return sessions;
+    var q = searchQuery.toLowerCase();
+    return sessions.filter(function(s) {
+      return (s.id && s.id.toLowerCase().indexOf(q) !== -1) ||
+             (s.firstMessage && s.firstMessage.toLowerCase().indexOf(q) !== -1) ||
+             (s.projectPath && s.projectPath.toLowerCase().indexOf(q) !== -1);
+    });
+  }, [sessions, searchQuery]);
+
+  const claudeSessions = useMemo(function() { return filteredSessions.filter(function(s) { return s.source === 'claude'; }); }, [filteredSessions]);
+  const qwenSessions = useMemo(function() { return filteredSessions.filter(function(s) { return s.source === 'qwen'; }); }, [filteredSessions]);
+
+  return React.createElement('div', { style: { display:'flex', flexDirection:'column', height:'100%' } },
+    // Topbar
+    React.createElement('div', { style: S.topbar },
+      React.createElement('button', { onClick: function() { setSidebarOpen(function(o) { return !o; }); }, style: { background:'none', border:'none', color:'var(--fg-2)', cursor:'pointer', padding:2, display:'flex' } }, Icon.menu),
+      React.createElement('span', { style: S.topbarTitle }, 'AgentView'),
+      activeSession ? React.createElement('span', { style: S.topbarMeta }, '/') : null,
+      activeSession ? React.createElement('span', { style: { ...S.topbarMeta, color:'var(--fg-2)' } }, activeSession.id.slice(0, 8)) : null,
+      activeSession ? React.createElement('span', { style: { ...S.badge, background: activeSession.source === 'qwen' ? 'rgba(234,179,8,0.15)' : 'rgba(255,255,255,0.08)', color: activeSession.source === 'qwen' ? 'var(--warn)' : 'var(--exec)' } }, activeSession.source) : null,
+      React.createElement('div', { style: { flex:1 } }),
+      React.createElement('button', { onClick: function() { setActiveSession(null); setLines([]); }, style: { background:'none', border:'none', color:'var(--meta)', cursor:'pointer', padding:4, display:'flex', fontSize:11, fontFamily:'var(--font-mono)', alignItems:'center', gap:4 } }, Icon.refresh, ' Refresh'),
+      React.createElement('button', { onClick: function() { setOutlineOpen(function(o) { return !o; }); }, style: { background:'none', border:'none', color: outlineOpen ? 'var(--fg-2)' : 'var(--meta)', cursor:'pointer', padding:4, display:'flex', fontSize:11, fontFamily:'var(--font-mono)', alignItems:'center', gap:4 } }, 'Outline')
+    ),
+    // Main
+    React.createElement('div', { style: { display:'flex', flex:1, overflow:'hidden' } },
+      // Sidebar
+      sidebarOpen ? React.createElement('div', { style: S.sidebar },
+        React.createElement('div', { style: S.sidebarHead },
+          React.createElement('span', null, 'Sessions'),
+          React.createElement('span', { style: S.badge }, filteredSessions.length)
+        ),
+        React.createElement('div', { style: { padding:'0 8px', marginBottom:4 } },
+          React.createElement('input', { style: { ...S.searchInput, width:'100%', fontSize:11 }, placeholder:'Filter sessions...', value:searchQuery, onChange: function(e) { setSearchQuery(e.target.value); } })
+        ),
+        React.createElement('div', { style: { flex:1, overflow:'auto' } },
+          loadingSessions ? React.createElement('div', { style: S.loading }, 'Loading...') : null,
+          !loadingSessions && filteredSessions.length === 0 ? React.createElement('div', { style: { padding:12, color:'var(--meta)', fontSize:11, textAlign:'center' } }, 'No sessions found') : null,
+          qwenSessions.length > 0 ? React.createElement('div', null,
+            React.createElement('div', { style: S.sourceGroup }, 'Qwen Code'),
+            qwenSessions.map(function(s) {
+              return React.createElement(SessionItem, { key: s.source+s.project+s.id, session: s, active: activeSession && activeSession.id === s.id && activeSession.source === s.source, onClick: function() { handleSessionClick(s); } });
+            })
+          ) : null,
+          claudeSessions.length > 0 ? React.createElement('div', null,
+            React.createElement('div', { style: S.sourceGroup }, 'Claude Code'),
+            claudeSessions.map(function(s) {
+              return React.createElement(SessionItem, { key: s.source+s.project+s.id, session: s, active: activeSession && activeSession.id === s.id && activeSession.source === s.source, onClick: function() { handleSessionClick(s); } });
+            })
+          ) : null
+        )
+      ) : null,
+      // Content
+      React.createElement('div', { style: S.content },
+        !activeSession ? React.createElement('div', { style: S.emptyState },
+          React.createElement('div', { style: { fontSize:40, opacity:0.15 } }, Icon.terminal),
+          React.createElement('div', { style: { fontSize:14, fontFamily:'var(--font-mono)' } }, 'Select a session to view'),
+          React.createElement('div', { style: { fontSize:11, color:'var(--meta)' } }, 'Claude Code & Qwen Code session transcripts')
+        ) : null,
+        activeSession ? React.createElement('div', { ref: chatRef, style: S.chatArea, onScroll: handleChatScroll },
+          error ? React.createElement('div', { style: { padding:10, color:'var(--warn)', fontSize:12, fontFamily:'var(--font-mono)' } }, 'Error: ' + error) : null,
+          lines.map(function(entry, i) {
+            return React.createElement('div', { id: 'entry-' + i, key: entry.uuid || i }, React.createElement(EntryRenderer, { entry: entry, showSystem: showSystem }));
+          }),
+          loading ? React.createElement('div', { style: S.loading }, 'Loading...') : null,
+          hasMore && !loading ? React.createElement('div', { style: S.loadMore, onClick: loadMore }, 'Load more entries...') : null,
+          !hasMore && lines.length > 0 ? React.createElement('div', { style: { textAlign:'center', padding:20, color:'var(--meta)', fontSize:11, fontFamily:'var(--font-mono)' } }, '\u2014 End of session \u2014') : null
+        ) : null
+      ),
+      // Outline panel
+      outlineOpen && activeSession ? React.createElement('div', { style: S.outline },
+        React.createElement('div', { style: S.outlineHead }, 'Outline'),
+        React.createElement('div', { ref: outlineRef, style: { flex:1, overflow:'auto' } },
+          React.createElement(OutlinePanel, { lines: lines, onClick: scrollToEntry, activeIndex: activeAnchorIndex })
+        )
+      ) : null,
+      // Bottom bar
+      activeSession ? React.createElement('div', { style: { position:'absolute', bottom:0, left: sidebarOpen ? '260px' : 0, right:0, display:'flex', alignItems:'center', padding:'8px 12px', borderTop:'1px solid var(--border)', gap:8, background:'var(--bg)', zIndex:10 } },
+        React.createElement('label', { style: { display:'flex', alignItems:'center', gap:4, fontSize:11, color:'var(--meta)', cursor:'pointer', fontFamily:'var(--font-mono)', userSelect:'none' } },
+          React.createElement('input', { type:'checkbox', checked:showSystem, onChange: function(e) { setShowSystem(e.target.checked); }, style: { cursor:'pointer' } }),
+          'System events'
+        ),
+        React.createElement('div', { style: { flex:1 } }),
+        React.createElement('span', { style: { fontSize:11, color:'var(--meta)', fontFamily:'var(--font-mono)' } }, lines.length + ' entries')
+      ) : null
+    )
+  );
+}
+
+// --- Prompt group helpers ---
+
+// Group lines by user prompt: each user prompt is a top-level group,
+// and all subsequent assistant/tool_result/tool-call/subagent entries
+// that follow it (until the next user prompt) become its children.
+function buildPromptGroups(lines) {
+  var groups = [];
+  var currentGroup = null;
+
+  for (var i = 0; i < lines.length; i++) {
+    var entry = lines[i];
+    if (entry.type === 'user') {
+      currentGroup = { user: entry, userIndex: i, children: [] };
+      groups.push(currentGroup);
+    } else if (currentGroup) {
+      // Detect system-level tool calls and subagent events
+      var isToolCall = entry.subtype === 'ui_telemetry' &&
+        entry.systemPayload && entry.systemPayload.uiEvent &&
+        entry.systemPayload.uiEvent['event.name'] === 'qwen-code.tool_call';
+      var isSubagent = entry.subtype === 'ui_telemetry' &&
+        entry.systemPayload && entry.systemPayload.uiEvent &&
+        (entry.systemPayload.uiEvent['event.name'] || '').indexOf('subagent') !== -1;
+
+      if (entry.type === 'assistant' || entry.type === 'tool_result' || isToolCall || isSubagent) {
+        currentGroup.children.push({ entry: entry, index: i });
+      }
+    }
+  }
+  return groups;
+}
+
+// Truncated preview text for a tree node (~60 chars)
+function getPreview(entry) {
+  var type = entry.type;
+  var preview = '';
+  if (type === 'user') {
+    preview = (entry.message && entry.message.parts && entry.message.parts[0] && entry.message.parts[0].text) || (entry.message && entry.message.content) || '';
+  } else if (type === 'assistant') {
+    var parts = (entry.message && entry.message.parts) || [];
+    for (var j = 0; j < parts.length; j++) {
+      if (parts[j].text) { preview = parts[j].text; break; }
+      if (parts[j].thought) { preview = '[thinking]'; break; }
+      if (parts[j].functionCall) { preview = parts[j].functionCall.name; break; }
+    }
+  } else if (type === 'tool_result') {
+    var result = entry.toolCallResult || entry.tool_result || {};
+    preview = result.name || entry.toolName || 'tool';
+  } else if (type === 'system' && entry.subtype === 'ui_telemetry') {
+    var uiEvent = entry.systemPayload && entry.systemPayload.uiEvent;
+    if (uiEvent) {
+      var eventName = uiEvent['event.name'] || '';
+      if (eventName === 'qwen-code.tool_call') {
+        preview = uiEvent.function_name || 'tool call';
+      } else if (eventName.indexOf('subagent') !== -1) {
+        preview = eventName;
+      }
+    }
+  }
+  if (typeof preview === 'string' && preview.length > 60) preview = preview.slice(0, 60) + '...';
+  return preview || '';
+}
+
+// Icon for an outline entry
+function getEntryIcon(entry) {
+  var type = entry.type;
+  if (type === 'user') return Icon.user;
+  if (type === 'assistant') return Icon.bot;
+  if (type === 'tool_result') return Icon.tool;
+  if (type === 'system' && entry.subtype === 'ui_telemetry') {
+    var uiEvent = entry.systemPayload && entry.systemPayload.uiEvent;
+    if (uiEvent) {
+      var eventName = uiEvent['event.name'] || '';
+      if (eventName === 'qwen-code.tool_call') return Icon.tool;
+      if (eventName.indexOf('subagent') !== -1) return Icon.system;
+    }
+  }
+  return Icon.system;
+}
+
+// --- Outline panel: 2-level prompt-group tree ---
+
+function OutlinePanel(props) {
+  var lines = props.lines, onClick = props.onClick, activeIndex = props.activeIndex;
+
+  var groups = useMemo(function() {
+    return buildPromptGroups(lines);
+  }, [lines]);
+
+  // User row style
+  var userRowBase = {
+    display: 'flex', alignItems: 'center', gap: 4, padding: '3px 12px',
+    cursor: 'pointer', fontSize: 11, fontFamily: 'var(--font-mono)',
+    overflow: 'hidden', whiteSpace: 'nowrap',
+    transition: 'background var(--motion-base)'
+  };
+
+  // Child row style (indented)
+  var childRowBase = {
+    display: 'flex', alignItems: 'center', gap: 4, padding: '3px 12px',
+    paddingLeft: '28px',
+    cursor: 'pointer', fontSize: 11, fontFamily: 'var(--font-mono)',
+    overflow: 'hidden', whiteSpace: 'nowrap'
+  };
+
+  return React.createElement('div', null,
+    groups.map(function(group) {
+      var userEntry = group.user;
+      var userPreview = getPreview(userEntry);
+      var isUserActive = group.userIndex === activeIndex;
+
+      return React.createElement('div', { key: userEntry.uuid || ('user-' + group.userIndex) },
+        // Level 1: user prompt
+        React.createElement('div', {
+          style: {
+            ...userRowBase,
+            color: isUserActive ? 'var(--fg)' : 'var(--fg-2)',
+            background: isUserActive ? 'var(--surface-warm)' : 'transparent',
+            borderLeft: isUserActive ? '2px solid var(--accent)' : '2px solid transparent'
+          },
+          onClick: function() { onClick(group.userIndex); }
+        },
+          React.createElement('span', { style: { flexShrink: 0, display: 'flex', alignItems: 'center', opacity: 0.7 } }, Icon.user),
+          React.createElement('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis' } }, userPreview)
+        ),
+        // Level 2: children (assistant, tool_result, tool calls, subagents)
+        group.children.map(function(child) {
+          var childEntry = child.entry;
+          var childPreview = getPreview(childEntry);
+          var childIcon = getEntryIcon(childEntry);
+          var isChildActive = child.index === activeIndex;
+
+          return React.createElement('div', {
+            key: childEntry.uuid || ('child-' + child.index),
+            style: {
+              ...childRowBase,
+              color: isChildActive ? 'var(--fg)' : 'var(--muted)',
+              background: isChildActive ? 'var(--surface-warm)' : 'transparent',
+              borderLeft: isChildActive ? '2px solid var(--accent)' : '2px solid transparent'
+            },
+            onClick: function() { onClick(child.index); }
+          },
+            React.createElement('span', { style: { flexShrink: 0, display: 'flex', alignItems: 'center', opacity: 0.6 } }, childIcon),
+            React.createElement('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis' } }, childPreview)
+          );
+        })
+      );
+    })
+  );
+}
+
+function SessionItem(props) {
+  var session = props.session, active = props.active, onClick = props.onClick;
+  var _useState = useState(false), hover = _useState[0], setHover = _useState[1];
+  var time = new Date(session.timestamp);
+  var timeStr = time.toLocaleDateString('en-US', { month:'short', day:'numeric' });
+
+  return React.createElement('div', {
+    style: { ...S.sessionItem(active), ...(hover && !active ? S.sessionItemHover : {}) },
+    onClick: onClick,
+    onMouseEnter: function() { setHover(true); },
+    onMouseLeave: function() { setHover(false); }
+  },
+    React.createElement('div', { style: S.sourceDot(session.source) }),
+    React.createElement('div', { style: { flex:1, overflow:'hidden' } },
+      React.createElement('div', { style: { overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' } },
+        session.firstMessage || session.id.slice(0, 12)
+      ),
+      React.createElement('div', { style: { fontSize:10, color:'var(--meta)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' } },
+        (session.projectPath || session.project) + ' \u00b7 ' + timeStr
+      )
+    ),
+    React.createElement('div', { style: { fontSize:10, color:'var(--meta)', flexShrink:0 } },
+      session.messageCount > 0 ? 'E' + session.messageCount : ''
+    )
+  );
+}
+
+function EntryRenderer(props) {
+  var entry = props.entry, showSystem = props.showSystem;
+  var type = entry.type;
+
+  if (type === 'system') {
+    if (!showSystem) return null;
+    var subtype = entry.subtype || '';
+    var eventName = (entry.systemPayload && entry.systemPayload.uiEvent && entry.systemPayload.uiEvent['event.name']) || subtype;
+    return React.createElement('div', { style: S.systemBlock },
+      Icon.system,
+      React.createElement('span', null, eventName || 'system'),
+      React.createElement('span', { style: { color:'var(--meta)' } }, formatTime(entry.timestamp))
+    );
+  }
+
+  if (type === 'user') {
+    var text = (entry.message && entry.message.parts && entry.message.parts[0] && entry.message.parts[0].text) || (entry.message && entry.message.content) || '';
+    return React.createElement('div', { style: S.msgRow('user') },
+      React.createElement('div', { style: S.msgAvatar('user') }, Icon.user),
+      React.createElement('div', null,
+        React.createElement('div', { style: S.msgBubble('user') }, text),
+        React.createElement('div', { style: { ...S.msgTime, textAlign:'right' } }, formatTime(entry.timestamp))
+      )
+    );
+  }
+
+  if (type === 'assistant') {
+    var parts = (entry.message && entry.message.parts) || [];
+    var model = entry.model || '';
+    return React.createElement('div', { style: S.msgRow('assistant') },
+      React.createElement('div', { style: S.msgAvatar('assistant') }, Icon.bot),
+      React.createElement('div', { style: { flex:1, minWidth:0 } },
+        parts.map(function(part, i) {
+          if (part.thought) return React.createElement(ThinkingBlock, { key: i, text: part.text });
+          if (part.functionCall) return React.createElement(ToolCallBlock, { key: i, fc: part.functionCall });
+          if (part.text) return React.createElement('div', { key: i, style: S.msgBubble('assistant') }, part.text);
+          return null;
+        }),
+        React.createElement('div', { style: { ...S.msgTime, display:'flex', gap:8 } },
+          React.createElement('span', null, formatTime(entry.timestamp)),
+          model ? React.createElement('span', { style: { color:'var(--meta)' } }, model) : null,
+          entry.usageMetadata ? React.createElement('span', { style: { color:'var(--meta)' } }, (entry.usageMetadata.totalTokenCount || entry.usageMetadata.inputTokens || '') + ' tokens') : null
+        )
+      )
+    );
+  }
+
+  if (type === 'tool_result') {
+    var result = entry.toolCallResult || entry.tool_result || {};
+    var name = result.name || entry.toolName || 'tool';
+    var output = '';
+    if (typeof result.result === 'string') output = result.result;
+    else if (result.output) output = result.output;
+    else if (result.content) output = typeof result.content === 'string' ? result.content : JSON.stringify(result.content);
+    else output = JSON.stringify(result, null, 2);
+    return React.createElement('div', { style: S.msgRow('assistant') },
+      React.createElement('div', { style: S.msgAvatar('assistant') }, Icon.tool),
+      React.createElement('div', { style: { flex:1, minWidth:0 } },
+        React.createElement(ToolResultBlock, { name: name, output: output }),
+        React.createElement('div', { style: S.msgTime }, formatTime(entry.timestamp))
+      )
+    );
+  }
+
+  return React.createElement('div', { style: S.systemBlock },
+    Icon.system,
+    React.createElement('span', null, type || 'unknown'),
+    React.createElement('span', { style: { color:'var(--meta)' } }, formatTime(entry.timestamp))
+  );
+}
+
+function ThinkingBlock(props) {
+  var text = props.text;
+  var _useState2 = useState(false), expanded = _useState2[0], setExpanded = _useState2[1];
+  return React.createElement('div', { style: S.thinkingBlock, onClick: function() { setExpanded(function(e) { return !e; }); } },
+    React.createElement('div', { style: { display:'flex', alignItems:'center', gap:6, color:'var(--muted)' } },
+      expanded ? Icon.chevronDown : Icon.chevronRight,
+      React.createElement('span', { style: { fontFamily:'var(--font-mono)', fontSize:11, fontStyle:'italic' } }, 'Thinking')
+    ),
+    expanded ? React.createElement('div', { style: { marginTop:6, whiteSpace:'pre-wrap', color:'var(--muted)', fontStyle:'italic', fontSize:12 } }, text) : null
+  );
+}
+
+function ToolCallBlock(props) {
+  var fc = props.fc;
+  var _useState3 = useState(false), expanded = _useState3[0], setExpanded = _useState3[1];
+  var args = fc.args || {};
+  var argsStr = typeof args === 'string' ? args : JSON.stringify(args, null, 2);
+
+  return React.createElement('div', { style: S.toolCallBlock },
+    React.createElement('div', { style: { display:'flex', alignItems:'center', gap:6, cursor:'pointer' }, onClick: function() { setExpanded(function(e) { return !e; }); } },
+      expanded ? Icon.chevronDown : Icon.chevronRight,
+      React.createElement('span', { style: { color:'var(--warn)', fontWeight:500 } }, fc.name),
+      React.createElement('span', { style: { color:'var(--meta)', fontSize:10 } }, (fc.id || '').slice(0, 8))
+    ),
+    expanded ? React.createElement('pre', { style: { marginTop:6, fontSize:11, color:'var(--fg-2)', whiteSpace:'pre-wrap', wordBreak:'break-all', maxHeight:200, overflow:'auto' } }, argsStr) : null
+  );
+}
+
+function ToolResultBlock(props) {
+  var name = props.name, output = props.output;
+  var _useState4 = useState(false), expanded = _useState4[0], setExpanded = _useState4[1];
+  var preview = output.slice(0, 300);
+
+  return React.createElement('div', { style: S.toolResultBlock },
+    React.createElement('div', { style: { display:'flex', alignItems:'center', gap:6, cursor:'pointer', marginBottom: expanded ? 6 : 0 }, onClick: function() { setExpanded(function(e) { return !e; }); } },
+      expanded ? Icon.chevronDown : Icon.chevronRight,
+      React.createElement('span', { style: { color:'var(--exec)', fontFamily:'var(--font-mono)', fontSize:11 } }, name),
+      React.createElement('span', { style: { color:'var(--meta)', fontSize:10 } }, 'result')
+    ),
+    expanded ? React.createElement('pre', { style: { fontSize:11, whiteSpace:'pre-wrap', wordBreak:'break-all', fontFamily:'var(--font-mono)' } }, output) : null,
+    !expanded ? React.createElement('div', { style: { fontSize:11, color:'var(--muted)', whiteSpace:'pre-wrap', wordBreak:'break-all', fontFamily:'var(--font-mono)', maxHeight:40, overflow:'hidden' } }, preview + (output.length > 300 ? '...' : '')) : null
+  );
+}
+
+function formatTime(ts) {
+  if (!ts) return '';
+  try {
+    var d = new Date(ts);
+    return d.toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false });
+  } catch(e) { return ts; }
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/tea/claude-devtools/**)",
+      "Agent(Explore)",
+      "Read(//mnt/workspace/TEMP-FILE-STATION/**)",
+      "Read(//home/tea/**)",
+      "Agent(general-purpose)"
+    ]
+  },
+  "$version": 4
+}
