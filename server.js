@@ -4,7 +4,7 @@ const path = require('path');
 const readline = require('readline');
 
 const app = express();
-const PORT = 3456;
+const PORT = 8456;
 
 // Serve static files from public/
 app.use(express.static(path.join(__dirname, 'dist')));
@@ -60,6 +60,45 @@ function countLines(filePath) {
   });
 }
 
+/**
+ * Scan a Claude JSONL file for the first user-type entry.
+ * Returns { timestamp, firstMessage } or null if none found.
+ */
+function findFirstUserMessageClaude(filePath) {
+  return new Promise((resolve) => {
+    const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
+    const rl = readline.createInterface({ input: stream });
+    rl.on('line', (line) => {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.type === 'user' && entry.message) {
+          const content = entry.message.content;
+          let text = '';
+          if (typeof content === 'string') {
+            text = content;
+          } else if (Array.isArray(content)) {
+            for (const block of content) {
+              if (block.type === 'text' && block.text) {
+                text = block.text;
+                break;
+              }
+            }
+          }
+          rl.close();
+          stream.destroy();
+          resolve({
+            timestamp: entry.timestamp || null,
+            firstMessage: text
+          });
+          return;
+        }
+      } catch { /* skip malformed */ }
+    });
+    rl.on('close', () => resolve(null));
+    stream.on('error', () => resolve(null));
+  });
+}
+
 function readLinesRange(filePath, offset, limit) {
   return new Promise((resolve) => {
     const lines = [];
@@ -108,7 +147,7 @@ app.get('/api/sessions', async (req, res) => {
         }
         // Use file mtime as fallback
         if (!timestamp) {
-          try { timestamp = fs.statSync(file).mtime.toISOString(); } catch {}
+          try { timestamp = fs.statSync(file).mtime.toISOString(); } catch { }
         }
 
         sessions.push({
@@ -128,21 +167,21 @@ app.get('/api/sessions', async (req, res) => {
     for (const file of claudeFiles) {
       const rel = path.relative(CLAUDE_CHATS_BASE, file);
       const parts = rel.split(path.sep);
-      if (parts.length >= 3 && parts[1] === 'chats') {
+      // Claude structure: <project>/<uuid>.jsonl (no chats/ subdir)
+      if (parts.length >= 2 && !parts[0].startsWith('chats')) {
         const project = parts[0];
         const sessionId = path.basename(file, '.jsonl');
-        const first = await parseFirstLine(file);
+        const msgInfo = await findFirstUserMessageClaude(file);
         const messageCount = await countLines(file);
+
         let firstMessage = '';
         let timestamp = null;
-        if (first) {
-          timestamp = first.timestamp || null;
-          if (first.message && first.message.parts && first.message.parts[0]) {
-            firstMessage = first.message.parts[0].text || '';
-          }
+        if (msgInfo) {
+          timestamp = msgInfo.timestamp;
+          firstMessage = msgInfo.firstMessage;
         }
         if (!timestamp) {
-          try { timestamp = fs.statSync(file).mtime.toISOString(); } catch {}
+          try { timestamp = fs.statSync(file).mtime.toISOString(); } catch { }
         }
         sessions.push({
           id: sessionId,
@@ -173,16 +212,15 @@ app.get('/api/sessions/:source/:project/:sessionId', async (req, res) => {
     const offset = parseInt(req.query.offset) || 0;
     const limit = Math.min(parseInt(req.query.limit) || 200, 1000);
 
-    let baseDir;
+    let filePath;
     if (source === 'qwen') {
-      baseDir = QWEN_CHATS_BASE;
+      filePath = path.join(QWEN_CHATS_BASE, project, 'chats', sessionId + '.jsonl');
     } else if (source === 'claude') {
-      baseDir = CLAUDE_CHATS_BASE;
+      filePath = path.join(CLAUDE_CHATS_BASE, project, sessionId + '.jsonl');
     } else {
       return res.status(400).json({ error: 'Unknown source: ' + source });
     }
 
-    const filePath = path.join(baseDir, project, 'chats', sessionId + '.jsonl');
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: 'Session not found', path: filePath });
     }
